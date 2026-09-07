@@ -302,15 +302,17 @@ table.stats-table td{ font-size:0.85rem; padding:6px 8px; }
    - main.py, workout_ai.py, user_data.py and body_diagram.py are
      ported line-for-line in behavior (localStorage stands in for
      the JSON save files on disk).
-   - pushups.py's rep-counting algorithm (angle smoothing + frame
-     debounce) is ported exactly and reused for PUSHUPS.
-   - situps.py, squats.py, lunges.py, jumping_jacks.py,
-     bicep_curls.py, shoulder_press.py, high_knees.py,
-     mountain_climbers.py and plank.py were NOT included in the
-     upload, so their rep-counters below are reasonable
-     approximations built with the same smoothing/debounce engine,
-     not exact ports. Look for TRACKER_CONFIGS below to tune them,
-     or send over the original files for an exact port.
+   - Every exercise's rep-counting algorithm (pushups.py, situps.py,
+     squats.py, lunges.py, jumping_jacks.py, bicep_curls.py,
+     shoulder_press.py, high_knees.py, mountain_climbers.py and
+     plank.py) is an exact port of its Python source: same joint
+     triples, same angle thresholds, same smoothing-history length,
+     same frame-debounce count, and the same rest/counted state
+     transition. high_knees.py and mountain_climbers.py track each
+     leg independently (no angle smoothing, 3-frame debounce per
+     leg) and sum both legs into one counter, exactly like the
+     originals. See TRACKER_CONFIGS below for the per-exercise
+     values.
    ================================================================ */
 
 /* ============================================================
@@ -1140,8 +1142,10 @@ const LM = {
   L_HIP:23, R_HIP:24, L_KNEE:25, R_KNEE:26, L_ANKLE:27, R_ANKLE:28,
 };
 
-const POSITION_FRAMES_REQUIRED = 5; // ported from pushups.py
-const HISTORY_LEN = 5;              // ported from pushups.py (deque(maxlen=5))
+// Frame-debounce count and smoothing-history length differ per
+// exercise in the original Python files, so these live on each
+// exercise's entry in TRACKER_CONFIGS instead of as one global
+// (framesRequired / historyLen, falling back to 5 if unset).
 
 /* ----------------------------------------------------------
    calculate_angle() / get_point() / landmark_visible() -
@@ -1165,71 +1169,89 @@ function landmarkVisible(landmarks, idx, threshold=0.5){
 }
 
 /* ----------------------------------------------------------
-   TRACKER_CONFIGS
-   - PUSHUPS is an exact port of pushups.py's arm-angle logic.
-   - Every other exercise is an original approximation (the
-     source .py files for those trackers were not uploaded),
-     built on the same smoothing + debounce engine.
+   TRACKER_CONFIGS - exact port of every exercise's Python file.
+
+   "restIsHigh" controls which state-arrival counts a rep:
+     true  -> a rep counts the moment the smoothed angle rises
+              back above highThreshold, coming from LOW
+              (pushups.py's "count on return to up" pattern).
+     false -> a rep counts the moment the smoothed angle drops
+              below lowThreshold, coming from HIGH
+              (bicep_curls.py's "count on contraction" pattern).
+
+   "mode: independentLegs" (high_knees.py, mountain_climbers.py)
+   tracks each leg's own raw (unsmoothed) angle and its own
+   3-frame debounce, summing both legs' reps into one counter -
+   exactly like those two files.
    ---------------------------------------------------------- */
 const TRACKER_CONFIGS = {
   "PUSHUPS": {
     exact: true,
     triples: [[LM.L_SHOULDER,LM.L_ELBOW,LM.L_WRIST],[LM.R_SHOULDER,LM.R_ELBOW,LM.R_WRIST]],
-    combine:"avg", highThreshold:155, lowThreshold:125,
-    highLabel:"UP", lowLabel:"DOWN", restIsHigh:true,
+    combine:"avg", historyLen:5, framesRequired:5,
+    highThreshold:155, lowThreshold:125,
+    highLabel:"UP", lowLabel:"DOWN", restIsHigh:true, initialStage:"HIGH",
   },
   "SIT-UPS": {
-    exact:false,
+    exact:true,
     triples: [[LM.L_SHOULDER,LM.L_HIP,LM.L_KNEE],[LM.R_SHOULDER,LM.R_HIP,LM.R_KNEE]],
-    combine:"avg", highThreshold:150, lowThreshold:90,
-    highLabel:"DOWN", lowLabel:"UP", restIsHigh:true,
+    combine:"avg", historyLen:8, framesRequired:5,
+    highThreshold:145, lowThreshold:105,
+    highLabel:"DOWN", lowLabel:"UP", restIsHigh:false, initialStage:"HIGH",
   },
   "SQUATS": {
-    exact:false,
+    exact:true,
     triples: [[LM.L_HIP,LM.L_KNEE,LM.L_ANKLE],[LM.R_HIP,LM.R_KNEE,LM.R_ANKLE]],
-    combine:"avg", highThreshold:160, lowThreshold:100,
-    highLabel:"UP", lowLabel:"DOWN", restIsHigh:true,
+    combine:"avg", historyLen:5, framesRequired:5,
+    highThreshold:160, lowThreshold:100,
+    highLabel:"UP", lowLabel:"DOWN", restIsHigh:true, initialStage:"HIGH",
   },
   "LUNGES": {
-    exact:false,
+    exact:true,
     triples: [[LM.L_HIP,LM.L_KNEE,LM.L_ANKLE],[LM.R_HIP,LM.R_KNEE,LM.R_ANKLE]],
-    combine:"avg", highThreshold:160, lowThreshold:100,
-    highLabel:"UP", lowLabel:"DOWN", restIsHigh:true,
+    combine:"min", historyLen:5, framesRequired:5,
+    highThreshold:160, lowThreshold:110,
+    highLabel:"UP", lowLabel:"DOWN", restIsHigh:true, initialStage:"HIGH",
   },
   "JUMPING JACKS": {
-    exact:false,
-    triples: [[LM.L_HIP,LM.L_SHOULDER,LM.L_WRIST],[LM.R_HIP,LM.R_SHOULDER,LM.R_WRIST]],
-    combine:"avg", highThreshold:110, lowThreshold:30,
-    highLabel:"OPEN", lowLabel:"CLOSED", restIsHigh:false,
+    exact:true,
+    triples: [[LM.L_HIP,LM.L_SHOULDER,LM.L_ELBOW],[LM.R_HIP,LM.R_SHOULDER,LM.R_ELBOW]],
+    combine:"avg", historyLen:5, framesRequired:4,
+    highThreshold:140, lowThreshold:40,
+    highLabel:"UP", lowLabel:"DOWN", restIsHigh:true, initialStage:"LOW",
   },
   "BICEP CURLS": {
-    exact:false,
+    exact:true,
     triples: [[LM.L_SHOULDER,LM.L_ELBOW,LM.L_WRIST],[LM.R_SHOULDER,LM.R_ELBOW,LM.R_WRIST]],
-    combine:"avg", highThreshold:150, lowThreshold:60,
-    highLabel:"DOWN", lowLabel:"UP", restIsHigh:true,
+    combine:"avg", historyLen:5, framesRequired:4,
+    highThreshold:150, lowThreshold:55,
+    highLabel:"DOWN", lowLabel:"UP", restIsHigh:false, initialStage:"HIGH",
   },
   "SHOULDER PRESS": {
-    exact:false,
+    exact:true,
     triples: [[LM.L_SHOULDER,LM.L_ELBOW,LM.L_WRIST],[LM.R_SHOULDER,LM.R_ELBOW,LM.R_WRIST]],
-    combine:"avg", highThreshold:155, lowThreshold:75,
-    highLabel:"UP", lowLabel:"DOWN", restIsHigh:true,
+    combine:"avg", historyLen:5, framesRequired:4,
+    highThreshold:160, lowThreshold:95,
+    highLabel:"UP", lowLabel:"DOWN", restIsHigh:true, initialStage:"LOW",
   },
   "HIGH KNEES": {
-    exact:false,
-    triples: [[LM.L_SHOULDER,LM.L_HIP,LM.L_KNEE],[LM.R_SHOULDER,LM.R_HIP,LM.R_KNEE]],
-    combine:"min", highThreshold:150, lowThreshold:100,
-    highLabel:"UP", lowLabel:"DOWN", restIsHigh:true,
+    exact:true, mode:"independentLegs", framesRequired:3,
+    leftTriple: [LM.L_SHOULDER,LM.L_HIP,LM.L_KNEE],
+    rightTriple:[LM.R_SHOULDER,LM.R_HIP,LM.R_KNEE],
+    highThreshold:150, lowThreshold:110,
+    highLabel:"DOWN", lowLabel:"UP", restIsHigh:false, initialStage:"HIGH",
   },
   "MOUNTAIN CLIMBERS": {
-    exact:false,
-    triples: [[LM.L_SHOULDER,LM.L_HIP,LM.L_KNEE],[LM.R_SHOULDER,LM.R_HIP,LM.R_KNEE]],
-    combine:"min", highThreshold:150, lowThreshold:100,
-    highLabel:"OUT", lowLabel:"IN", restIsHigh:true,
+    exact:true, mode:"independentLegs", framesRequired:3,
+    leftTriple: [LM.L_SHOULDER,LM.L_HIP,LM.L_KNEE],
+    rightTriple:[LM.R_SHOULDER,LM.R_HIP,LM.R_KNEE],
+    highThreshold:150, lowThreshold:100,
+    highLabel:"OUT", lowLabel:"IN", restIsHigh:false, initialStage:"HIGH",
   },
   "PLANK": {
-    exact:false, isTimed:true,
+    exact:true, isTimed:true,
     triples: [[LM.L_SHOULDER,LM.L_HIP,LM.L_ANKLE],[LM.R_SHOULDER,LM.R_HIP,LM.R_ANKLE]],
-    combine:"avg", holdThreshold:150,
+    combine:"avg", holdThreshold:155,
   },
 };
 
@@ -1262,38 +1284,106 @@ let rafHandle = null;
 
 function resetTracker(){
   if (!trackerConfig) return;
-  if (trackerConfig.isTimed){
+  const cfg = trackerConfig;
+  if (cfg.isTimed){
     trackerState = { elapsed:0, holding:false, lastTs:null };
+  } else if (cfg.mode === "independentLegs"){
+    // Each leg starts at the exercise's starting stage, exactly
+    // like the per-leg globals in high_knees.py / mountain_climbers.py.
+    trackerState = {
+      counter:0,
+      stage: cfg.initialStage,
+      left:  { stage: cfg.initialStage, highFrames:0, lowFrames:0 },
+      right: { stage: cfg.initialStage, highFrames:0, lowFrames:0 },
+    };
   } else {
     trackerState = {
       counter:0,
-      stage: trackerConfig.restIsHigh ? "HIGH" : "LOW",
+      stage: cfg.initialStage,
       highFrames:0, lowFrames:0, history:[],
     };
   }
   updateTrackerDisplay(null);
 }
 
+/* ----------------------------------------------------------
+   updateTrackerRep - shared bilateral engine (angle history +
+   frame debounce), used by every exercise except the two
+   independent-leg trackers and the timed plank hold.
+   ---------------------------------------------------------- */
 function updateTrackerRep(angle){
   const cfg = trackerConfig, st = trackerState;
+  const historyLen = cfg.historyLen || 5;
+  const framesRequired = cfg.framesRequired || 5;
+
   st.history.push(angle);
-  if (st.history.length > HISTORY_LEN) st.history.shift();
+  if (st.history.length > historyLen) st.history.shift();
   const smoothed = st.history.reduce((a,b)=>a+b,0) / st.history.length;
 
   if (smoothed > cfg.highThreshold){
     st.highFrames += 1; st.lowFrames = 0;
-    if (st.highFrames >= POSITION_FRAMES_REQUIRED){
+    if (st.highFrames >= framesRequired){
       if (cfg.restIsHigh && st.stage === "LOW") st.counter += 1;
       st.stage = "HIGH";
     }
   } else if (smoothed < cfg.lowThreshold){
     st.lowFrames += 1; st.highFrames = 0;
-    if (st.lowFrames >= POSITION_FRAMES_REQUIRED){
+    if (st.lowFrames >= framesRequired){
       if (!cfg.restIsHigh && st.stage === "HIGH") st.counter += 1;
       st.stage = "LOW";
     }
   }
   return smoothed;
+}
+
+/* ----------------------------------------------------------
+   Independent-leg engine - ported from high_knees.py and
+   mountain_climbers.py. Each leg uses its OWN raw angle (no
+   history smoothing) and its own 3-frame debounce; a rep is
+   counted for whichever leg reaches its counted position, and
+   both legs' reps sum into the single displayed counter.
+   ---------------------------------------------------------- */
+function updateLegState(legSt, angle, cfg){
+  const framesRequired = cfg.framesRequired || 3;
+
+  if (angle > cfg.highThreshold){
+    legSt.highFrames += 1; legSt.lowFrames = 0;
+    if (legSt.highFrames >= framesRequired){
+      if (cfg.restIsHigh && legSt.stage === "LOW") trackerState.counter += 1;
+      legSt.stage = "HIGH";
+    }
+  } else if (angle < cfg.lowThreshold){
+    legSt.lowFrames += 1; legSt.highFrames = 0;
+    if (legSt.lowFrames >= framesRequired){
+      if (!cfg.restIsHigh && legSt.stage === "HIGH") trackerState.counter += 1;
+      legSt.stage = "LOW";
+    }
+  }
+}
+
+function updateTrackerRepIndependentLegs(landmarks){
+  const cfg = trackerConfig, st = trackerState;
+  let leftAngle = null, rightAngle = null;
+
+  const [la, lb, lc] = cfg.leftTriple;
+  if (landmarkVisible(landmarks,la) && landmarkVisible(landmarks,lb) && landmarkVisible(landmarks,lc)){
+    leftAngle = calculateAngle(getPoint(landmarks,la), getPoint(landmarks,lb), getPoint(landmarks,lc));
+    updateLegState(st.left, leftAngle, cfg);
+  }
+
+  const [ra, rb, rc] = cfg.rightTriple;
+  if (landmarkVisible(landmarks,ra) && landmarkVisible(landmarks,rb) && landmarkVisible(landmarks,rc)){
+    rightAngle = calculateAngle(getPoint(landmarks,ra), getPoint(landmarks,rb), getPoint(landmarks,rc));
+    updateLegState(st.right, rightAngle, cfg);
+  }
+
+  // Overall displayed state: "counted" side wins if either leg is there.
+  st.stage = (st.left.stage === "LOW" || st.right.stage === "LOW") ? "LOW" : "HIGH";
+
+  if (leftAngle !== null && rightAngle !== null) return Math.min(leftAngle, rightAngle);
+  if (leftAngle !== null) return leftAngle;
+  if (rightAngle !== null) return rightAngle;
+  return null;
 }
 
 function updateTrackerHold(angle, now){
@@ -1346,16 +1436,20 @@ function onPoseResults(results){
     }
 
     if (trackerRunning && trackerConfig){
-      const rawAngle = computeTrackedAngle(results.poseLandmarks, trackerConfig.triples, trackerConfig.combine);
-      if (rawAngle !== null){
-        if (trackerConfig.isTimed){
-          angle = rawAngle;
-          updateTrackerHold(rawAngle, performance.now());
-        } else {
-          angle = updateTrackerRep(rawAngle);
+      if (trackerConfig.mode === "independentLegs"){
+        angle = updateTrackerRepIndependentLegs(results.poseLandmarks);
+      } else {
+        const rawAngle = computeTrackedAngle(results.poseLandmarks, trackerConfig.triples, trackerConfig.combine);
+        if (rawAngle !== null){
+          if (trackerConfig.isTimed){
+            angle = rawAngle;
+            updateTrackerHold(rawAngle, performance.now());
+          } else {
+            angle = updateTrackerRep(rawAngle);
+          }
+        } else if (trackerConfig.isTimed){
+          updateTrackerHold(null, performance.now());
         }
-      } else if (trackerConfig.isTimed){
-        updateTrackerHold(null, performance.now());
       }
     }
   }
@@ -1409,9 +1503,7 @@ async function launchTracker(exerciseName, isTimed){
   trackerConfig = TRACKER_CONFIGS[exerciseName];
   document.getElementById("tracker-title").textContent = exerciseName;
   document.getElementById("tracker-error").style.display = "none";
-  document.getElementById("tracker-approx-note").textContent = trackerConfig.exact
-    ? ""
-    : "Approximated rep-detection logic (original tracker source for this exercise wasn't provided).";
+  document.getElementById("tracker-approx-note").textContent = "";
 
   resetTracker();
   showView("tracker-view");
