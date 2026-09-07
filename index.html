@@ -139,6 +139,53 @@ table.stats-table td{ font-size:0.85rem; padding:6px 8px; }
 .history-row{ padding:4px 10px; text-align:center; }
 .history-row:nth-child(odd){ background:rgba(255,255,255,0.02); }
 
+/* ---- music ---- */
+.music-player{
+  background:var(--bg-panel); border-radius:8px; width:100%; max-width:520px;
+  padding:16px 20px; margin-bottom:18px;
+}
+.music-now-playing{
+  color:var(--accent); font-weight:700; font-size:0.95rem; text-align:center;
+  margin-bottom:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.music-seek-row{ display:flex; align-items:center; gap:10px; }
+.music-time{ color:var(--text-muted); font-size:0.75rem; font-weight:700; min-width:34px; text-align:center; }
+.music-volume-row{ display:flex; align-items:center; gap:10px; margin-top:4px; }
+.music-volume-row input[type=range]{ flex:1; }
+input[type=range]{
+  -webkit-appearance:none; appearance:none; width:100%; height:6px; border-radius:3px;
+  background:var(--steel); outline:none; cursor:pointer;
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none; appearance:none; width:16px; height:16px; border-radius:50%;
+  background:var(--accent); cursor:pointer; border:none;
+}
+input[type=range]::-moz-range-thumb{
+  width:16px; height:16px; border-radius:50%; background:var(--accent); cursor:pointer; border:none;
+}
+.music-playlist-title{ color:var(--accent); font-weight:700; font-size:0.85rem; letter-spacing:1px; margin-bottom:8px; }
+.music-playlist{
+  background:var(--bg-panel); width:100%; max-width:520px; max-height:260px; overflow-y:auto;
+  border-radius:8px; padding:6px;
+}
+.music-empty{ color:var(--text-muted); font-weight:700; font-size:0.85rem; text-align:center; padding:20px; }
+.music-track{
+  display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:6px;
+  cursor:pointer; margin-bottom:4px; background:transparent;
+}
+.music-track:hover{ background:var(--steel-hover); }
+.music-track.playing{ background:var(--accent); }
+.music-track.playing .music-track-name{ color:#1a1a1a; }
+.music-track-icon{ flex-shrink:0; font-size:1rem; }
+.music-track-name{
+  flex:1; font-size:0.88rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.music-track-remove{
+  flex-shrink:0; background:transparent; color:var(--text-muted); border:none;
+  font-weight:900; font-size:1rem; padding:2px 8px; border-radius:4px;
+}
+.music-track-remove:hover{ background:var(--exit); color:var(--text-main); }
+
 /* ---- exercise tracker ---- */
 #tracker-view{ max-width:900px; }
 .tracker-topbar{
@@ -200,6 +247,7 @@ table.stats-table td{ font-size:0.85rem; padding:6px 8px; }
     <div class="row" style="margin-bottom:20px;">
       <button class="btn-steel btn-mid" id="muscle-map-btn">&#129357; MUSCLE MAP</button>
       <button class="btn-steel btn-mid" id="stats-btn">&#128202; MY STATS</button>
+      <button class="btn-steel btn-mid" id="music-btn">&#127925; MUSIC</button>
     </div>
 
     <div class="divider"></div>
@@ -254,6 +302,47 @@ table.stats-table td{ font-size:0.85rem; padding:6px 8px; }
        STATS VIEW
   ============================================================ -->
   <section id="stats-view" class="view"></section>
+
+  <!-- ============================================================
+       MUSIC VIEW
+  ============================================================ -->
+  <section id="music-view" class="view">
+    <div class="kicker">&#9670; W O R K O U T &nbsp; M U S I C &#9670;</div>
+    <h1 class="brand">MUSIC</h1>
+    <div class="subtitle">PICK LOCAL AUDIO OR MP4 FILES &bull; KEEPS PLAYING WHILE YOU TRAIN</div>
+
+    <input type="file" id="music-file-input" accept="audio/*,video/mp4,.mp4" multiple hidden />
+    <div class="row" style="margin-bottom:16px;">
+      <button class="btn-accent btn-mid" id="music-add-btn">&#127925; ADD AUDIO FILE(S)</button>
+      <button class="btn-steel btn-mid" id="music-clear-btn">CLEAR PLAYLIST</button>
+    </div>
+
+    <div class="music-player" id="music-player">
+      <audio id="music-audio" preload="metadata"></audio>
+      <div class="music-now-playing" id="music-now-playing">NO TRACK LOADED</div>
+      <div class="music-seek-row">
+        <span class="music-time" id="music-time-current">0:00</span>
+        <input type="range" id="music-seek" min="0" max="100" value="0" step="0.1" />
+        <span class="music-time" id="music-time-total">0:00</span>
+      </div>
+      <div class="row" style="gap:10px; margin:10px 0;">
+        <button class="btn-steel btn-mid" id="music-prev-btn">&#9198; PREV</button>
+        <button class="btn-accent btn-mid" id="music-playpause-btn">&#9654; PLAY</button>
+        <button class="btn-steel btn-mid" id="music-next-btn">NEXT &#9197;</button>
+      </div>
+      <div class="music-volume-row">
+        <span>&#128266;</span>
+        <input type="range" id="music-volume" min="0" max="1" value="1" step="0.01" />
+      </div>
+    </div>
+
+    <div class="music-playlist-title">PLAYLIST</div>
+    <div class="music-playlist" id="music-playlist">
+      <div class="music-empty" id="music-empty">No audio files added yet.</div>
+    </div>
+
+    <button class="btn-steel btn-wide" id="music-back-btn" style="margin-top:20px;">BACK TO MENU</button>
+  </section>
 
   <!-- ============================================================
        EXERCISE TRACKER VIEW
@@ -617,7 +706,7 @@ let exerciseLaunchContext = null; // {type:'freeplay', name, isTimed} | {type:'w
 /* ============================================================
    VIEW SWITCHING
    ============================================================ */
-const VIEW_IDS = ["login-view","menu-view","goal-view","workout-view","hooray-view","muscle-view","stats-view","tracker-view","goodbye-view"];
+const VIEW_IDS = ["login-view","menu-view","goal-view","workout-view","hooray-view","muscle-view","stats-view","music-view","tracker-view","goodbye-view"];
 function showView(id){
   for (const v of VIEW_IDS) document.getElementById(v).classList.remove("active");
   document.getElementById(id).classList.add("active");
@@ -1132,8 +1221,204 @@ function buildMenuView(){
 }
 
 /* ================================================================
-   EXERCISE TRACKER ENGINE
+   MUSIC PLAYER
+   ================================================================
+   Lets the person pick one or more local audio files - or .mp4
+   files - via a plain <input type="file"> and play them back with
+   a small playlist UI. An .mp4's audio track plays fine through a
+   plain <audio> element (its video track is simply never rendered,
+   since there's no <video> element to show it). Files never leave
+   the browser - each selected File is turned into an object URL
+   (URL.createObjectURL) purely for local playback. The underlying
+   <audio> element lives inside the music-view section, but since
+   views are hidden with CSS (display:none) rather than removed
+   from the DOM, playback keeps going in the background if the
+   person navigates to another view (e.g. starts a workout) without
+   pausing it first.
    ================================================================ */
+let musicPlaylist = [];   // [{ name, url, file }]
+let musicCurrentIndex = -1;
+
+function musicAudioEl(){ return document.getElementById("music-audio"); }
+
+function formatTime(seconds){
+  if (!isFinite(seconds) || seconds < 0) seconds = 0;
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function renderMusicPlaylist(){
+  const list = document.getElementById("music-playlist");
+  list.innerHTML = "";
+
+  if (!musicPlaylist.length){
+    const empty = document.createElement("div");
+    empty.className = "music-empty";
+    empty.id = "music-empty";
+    empty.textContent = "No audio files added yet.";
+    list.appendChild(empty);
+    return;
+  }
+
+  musicPlaylist.forEach((track, i) => {
+    const row = document.createElement("div");
+    row.className = "music-track" + (i === musicCurrentIndex ? " playing" : "");
+
+    const icon = document.createElement("span");
+    icon.className = "music-track-icon";
+    icon.textContent = (i === musicCurrentIndex && !musicAudioEl().paused) ? "\u25B6" : "\u266A";
+    row.appendChild(icon);
+
+    const name = document.createElement("span");
+    name.className = "music-track-name";
+    name.textContent = track.name;
+    row.appendChild(name);
+
+    const remove = document.createElement("button");
+    remove.className = "music-track-remove";
+    remove.textContent = "\u2715";
+    remove.title = "Remove from playlist";
+    remove.onclick = (e) => { e.stopPropagation(); removeMusicTrack(i); };
+    row.appendChild(remove);
+
+    row.onclick = () => playMusicTrack(i);
+    list.appendChild(row);
+  });
+}
+
+function playMusicTrack(index){
+  if (index < 0 || index >= musicPlaylist.length) return;
+  musicCurrentIndex = index;
+  const track = musicPlaylist[index];
+  const audio = musicAudioEl();
+  audio.src = track.url;
+  audio.play().catch(() => {}); // browser may block autoplay until a user gesture; the click here counts as one
+  document.getElementById("music-now-playing").textContent = track.name;
+  renderMusicPlaylist();
+}
+
+function removeMusicTrack(index){
+  const track = musicPlaylist[index];
+  const audio = musicAudioEl();
+
+  if (index === musicCurrentIndex){
+    audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
+    musicCurrentIndex = -1;
+    document.getElementById("music-now-playing").textContent = "NO TRACK LOADED";
+    document.getElementById("music-playpause-btn").innerHTML = "&#9654; PLAY";
+  } else if (index < musicCurrentIndex){
+    musicCurrentIndex -= 1;
+  }
+
+  URL.revokeObjectURL(track.url);
+  musicPlaylist.splice(index, 1);
+  renderMusicPlaylist();
+}
+
+function clearMusicPlaylist(){
+  const audio = musicAudioEl();
+  audio.pause();
+  audio.removeAttribute("src");
+  audio.load();
+  musicPlaylist.forEach(t => URL.revokeObjectURL(t.url));
+  musicPlaylist = [];
+  musicCurrentIndex = -1;
+  document.getElementById("music-now-playing").textContent = "NO TRACK LOADED";
+  document.getElementById("music-playpause-btn").innerHTML = "&#9654; PLAY";
+  renderMusicPlaylist();
+}
+
+function isPlayableMusicFile(file){
+  if (file.type && file.type.startsWith("audio/")) return true;
+  if (file.type === "video/mp4") return true;
+  return /\.mp4$/i.test(file.name); // some OSes report no MIME type for local files
+}
+
+function addMusicFiles(fileList){
+  const files = Array.from(fileList || []).filter(isPlayableMusicFile);
+  if (!files.length) return;
+
+  const hadNoTracks = musicPlaylist.length === 0;
+  files.forEach(file => {
+    musicPlaylist.push({ name: file.name, url: URL.createObjectURL(file), file });
+  });
+  renderMusicPlaylist();
+
+  if (hadNoTracks) playMusicTrack(0);
+}
+
+function toggleMusicPlayPause(){
+  const audio = musicAudioEl();
+  if (!musicPlaylist.length) return;
+
+  if (musicCurrentIndex === -1){
+    playMusicTrack(0);
+    return;
+  }
+
+  if (audio.paused){
+    audio.play().catch(() => {});
+  } else {
+    audio.pause();
+  }
+}
+
+function musicNext(){
+  if (!musicPlaylist.length) return;
+  playMusicTrack((musicCurrentIndex + 1) % musicPlaylist.length);
+}
+
+function musicPrev(){
+  if (!musicPlaylist.length) return;
+  playMusicTrack((musicCurrentIndex - 1 + musicPlaylist.length) % musicPlaylist.length);
+}
+
+function setupMusicPlayer(){
+  const audio = musicAudioEl();
+  const seek = document.getElementById("music-seek");
+  const volume = document.getElementById("music-volume");
+  const playPauseBtn = document.getElementById("music-playpause-btn");
+  let seeking = false;
+
+  document.getElementById("music-add-btn").onclick = () => document.getElementById("music-file-input").click();
+  document.getElementById("music-file-input").addEventListener("change", (e) => {
+    addMusicFiles(e.target.files);
+    e.target.value = ""; // allow re-adding the same file later
+  });
+  document.getElementById("music-clear-btn").onclick = clearMusicPlaylist;
+  document.getElementById("music-back-btn").onclick = () => showView("menu-view");
+
+  playPauseBtn.onclick = toggleMusicPlayPause;
+  document.getElementById("music-next-btn").onclick = musicNext;
+  document.getElementById("music-prev-btn").onclick = musicPrev;
+
+  audio.addEventListener("play", () => { playPauseBtn.innerHTML = "&#10074;&#10074; PAUSE"; renderMusicPlaylist(); });
+  audio.addEventListener("pause", () => { playPauseBtn.innerHTML = "&#9654; PLAY"; renderMusicPlaylist(); });
+  audio.addEventListener("ended", musicNext);
+
+  audio.addEventListener("loadedmetadata", () => {
+    seek.max = audio.duration || 0;
+    document.getElementById("music-time-total").textContent = formatTime(audio.duration);
+  });
+  audio.addEventListener("timeupdate", () => {
+    if (seeking) return;
+    seek.value = audio.currentTime;
+    document.getElementById("music-time-current").textContent = formatTime(audio.currentTime);
+  });
+
+  seek.addEventListener("input", () => { seeking = true; });
+  seek.addEventListener("change", () => {
+    audio.currentTime = Number(seek.value);
+    seeking = false;
+  });
+
+  volume.addEventListener("input", () => { audio.volume = Number(volume.value); });
+}
+
+
 
 // BlazePose landmark indices (standard MediaPipe Pose numbering -
 // matches mp_pose.PoseLandmark used in pushups.py).
@@ -1549,6 +1834,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("goal-ai-btn").onclick = () => showView("goal-view");
   document.getElementById("muscle-map-btn").onclick = () => showView("muscle-view");
   document.getElementById("stats-btn").onclick = () => { renderStatsView(); showView("stats-view"); };
+  document.getElementById("music-btn").onclick = () => showView("music-view");
+  setupMusicPlayer();
   document.getElementById("switch-user-btn").onclick = confirmSwitchUser;
   document.getElementById("exit-btn").onclick = exitApplication;
 
