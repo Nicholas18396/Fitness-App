@@ -1,0 +1,1478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Iron Tracker</title>
+
+<!-- MediaPipe Pose (classic solutions API) - used to power the live rep counters -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+
+<style>
+/* ============================================================
+   PALETTE - ported 1:1 from main.py's color constants
+   ============================================================ */
+:root{
+  --bg-dark:#121212;
+  --bg-panel:#1c1c1c;
+  --accent:#FF6B00;
+  --accent-hover:#CC5500;
+  --steel:#3a3a3a;
+  --steel-hover:#2a2a2a;
+  --text-main:#F5F5F5;
+  --text-muted:#9a9a9a;
+  --exit:#B71C1C;
+  --exit-hover:#8e1616;
+  --ai-daily:#00C853;
+  --ai-daily-hover:#009624;
+  --ai-goal:#6A1B9A;
+  --ai-goal-hover:#4a1170;
+  --done:#2E7D32;
+  --good:#00E676;
+  --warn:#FFB300;
+  --bad:#FF5252;
+}
+
+*{ box-sizing:border-box; }
+
+html,body{
+  margin:0; padding:0; height:100%;
+  background:var(--bg-dark);
+  color:var(--text-main);
+  font-family:"Segoe UI", Arial, Helvetica, sans-serif;
+}
+
+body{
+  display:flex; flex-direction:column; min-height:100vh;
+}
+
+.accent-bar{ height:8px; background:var(--accent); flex-shrink:0; }
+
+#content{
+  flex:1; display:flex; align-items:center; justify-content:center;
+  padding:24px 16px;
+}
+
+.view{ display:none; flex-direction:column; align-items:center; width:100%; max-width:960px; }
+.view.active{ display:flex; }
+
+.kicker{ color:var(--accent); font-weight:700; font-size:0.8rem; letter-spacing:3px; margin-bottom:6px; }
+h1.brand{ font-size:2.2rem; font-weight:900; margin:0 0 6px; letter-spacing:1px; }
+.subtitle{ color:var(--text-muted); font-weight:700; font-size:0.95rem; margin-bottom:20px; text-align:center; }
+
+/* ---- generic buttons ---- */
+button{
+  font-family:inherit; font-weight:700; border:none; border-radius:6px;
+  cursor:pointer; color:var(--text-main); padding:14px 18px; font-size:0.95rem;
+  transition:background-color .12s ease;
+}
+button:disabled{ cursor:default; opacity:0.85; }
+
+.btn-accent{ background:var(--accent); } .btn-accent:hover:not(:disabled){ background:var(--accent-hover); }
+.btn-steel{ background:var(--steel); } .btn-steel:hover:not(:disabled){ background:var(--steel-hover); }
+.btn-exit{ background:var(--exit); } .btn-exit:hover:not(:disabled){ background:var(--exit-hover); }
+.btn-daily{ background:var(--ai-daily); } .btn-daily:hover:not(:disabled){ background:var(--ai-daily-hover); }
+.btn-goal{ background:var(--ai-goal); } .btn-goal:hover:not(:disabled){ background:var(--ai-goal-hover); }
+.btn-done{ background:var(--done); }
+
+.btn-wide{ width:230px; height:60px; }
+.btn-mid{ width:190px; height:50px; }
+
+.row{ display:flex; gap:16px; flex-wrap:wrap; justify-content:center; }
+
+input[type=text]{
+  font-family:inherit; background:var(--bg-panel); color:var(--text-main);
+  border:none; border-radius:6px; text-align:center; font-size:1.05rem;
+  padding:12px 14px; width:320px; max-width:80vw;
+}
+input[type=text]:focus{ outline:2px solid var(--accent); }
+
+/* ---- login ---- */
+.error-text{ color:var(--bad); font-weight:700; font-size:0.85rem; min-height:1.2em; margin:10px 0; }
+.recent-row{ display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:10px; }
+.recent-btn{ background:var(--bg-panel); font-size:0.85rem; padding:8px 14px; }
+.recent-btn:hover{ background:var(--steel); }
+.recent-label{ color:var(--text-muted); font-weight:700; font-size:0.8rem; margin-bottom:8px; }
+
+/* ---- menu ---- */
+.divider{ width:80%; max-width:460px; height:2px; background:var(--steel); margin:0 0 25px; }
+.exercise-grid{
+  display:grid; grid-template-columns:repeat(2, minmax(180px,220px)); gap:10px 10px; justify-content:center;
+}
+.exercise-btn{ height:66px; font-size:0.95rem; display:flex; align-items:center; justify-content:center; gap:8px; }
+.footer-note{ color:var(--steel); font-weight:700; font-size:0.8rem; margin-top:25px; }
+
+/* ---- goal view ---- */
+.goal-hint{ color:var(--text-muted); font-size:0.9rem; margin-bottom:20px; }
+
+/* ---- workout dashboard ---- */
+.workout-row{
+  background:var(--bg-panel); border-radius:6px; width:100%; max-width:720px;
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  padding:14px 18px; margin-bottom:10px; flex-wrap:wrap;
+}
+.workout-name{ font-weight:700; flex:1; min-width:200px; }
+.workout-status{ font-weight:700; font-size:0.9rem; min-width:140px; }
+.completion-banner{ color:var(--good); font-weight:700; font-size:1.1rem; margin-top:16px; text-align:center; }
+
+/* ---- hooray ---- */
+.hooray-banner{ font-size:2.4rem; font-weight:900; color:var(--good); margin-bottom:10px; }
+.hooray-summary{ margin:0 0 26px; text-align:center; }
+.hooray-summary div{ font-weight:700; margin:4px 0; }
+
+/* ---- muscle map ---- */
+.muscle-layout{ display:flex; gap:30px; flex-wrap:wrap; justify-content:center; align-items:flex-start; }
+.muscle-list{ display:flex; flex-direction:column; gap:6px; }
+.muscle-btn{ width:220px; font-size:0.85rem; padding:10px 12px; text-align:left; }
+.muscle-info{ color:var(--text-muted); font-weight:700; text-align:center; max-width:600px; margin:15px 0; min-height:1.4em; }
+
+/* ---- stats ---- */
+table.stats-table{ border-collapse:collapse; margin-bottom:20px; width:100%; max-width:640px; }
+table.stats-table th{ color:var(--accent); font-size:0.8rem; padding:6px 8px; text-align:left; }
+table.stats-table td{ font-size:0.85rem; padding:6px 8px; }
+.history-title{ color:var(--accent); font-weight:700; margin:10px 0; }
+.history-box{
+  background:var(--bg-panel); width:100%; max-width:640px; height:190px; overflow-y:auto;
+  border-radius:6px; padding:8px 4px; font-family:Consolas, monospace; font-size:0.82rem;
+}
+.history-row{ padding:4px 10px; text-align:center; }
+.history-row:nth-child(odd){ background:rgba(255,255,255,0.02); }
+
+/* ---- exercise tracker ---- */
+#tracker-view{ max-width:900px; }
+.tracker-topbar{
+  width:100%; display:flex; gap:10px; justify-content:center; margin-bottom:14px; flex-wrap:wrap;
+}
+.tracker-topbar button{ height:44px; }
+.video-wrap{ position:relative; width:100%; max-width:640px; aspect-ratio:4/3; background:#000; border-radius:8px; overflow:hidden; }
+.video-wrap video{ display:none; }
+.video-wrap canvas{ width:100%; height:100%; display:block; transform:scaleX(-1); }
+.tracker-info{ text-align:center; margin-top:14px; }
+.tracker-info .ex-title{ color:var(--accent); font-weight:900; font-size:1.1rem; letter-spacing:1px; }
+.tracker-info .reps{ color:var(--good); font-weight:900; font-size:2.4rem; margin:4px 0; }
+.tracker-info .state{ font-weight:700; margin-bottom:4px; }
+.tracker-info .angle{ color:#ffff66; font-weight:700; font-size:0.85rem; }
+.tracker-hint{ color:var(--text-muted); font-size:0.8rem; margin-top:10px; text-align:center; max-width:500px; }
+.approx-note{ color:var(--warn); font-size:0.75rem; margin-top:6px; text-align:center; max-width:500px; }
+.camera-error{ color:var(--bad); font-weight:700; text-align:center; margin-top:14px; }
+
+/* ---- goodbye ---- */
+.goodbye-text{ font-size:1.4rem; font-weight:700; text-align:center; margin-bottom:20px; }
+
+@media (max-width:520px){
+  .exercise-grid{ grid-template-columns:1fr; }
+  h1.brand{ font-size:1.7rem; }
+}
+</style>
+</head>
+<body>
+
+<div class="accent-bar"></div>
+<div id="content">
+
+  <!-- ============================================================
+       LOGIN VIEW
+  ============================================================ -->
+  <section id="login-view" class="view">
+    <div class="kicker">&#9670; T R A I N I N G &nbsp; L O G &#9670;</div>
+    <h1 class="brand">IRON TRACKER</h1>
+    <div class="subtitle">ENTER YOUR NAME TO BEGIN</div>
+    <input type="text" id="login-username" placeholder="" />
+    <div class="error-text" id="login-error"></div>
+    <button class="btn-accent btn-wide" id="login-btn">LET'S GO</button>
+    <div id="login-recent"></div>
+  </section>
+
+  <!-- ============================================================
+       MENU VIEW
+  ============================================================ -->
+  <section id="menu-view" class="view">
+    <div class="kicker">&#9670; T R A I N I N G &nbsp; L O G &#9670;</div>
+    <h1 class="brand">IRON TRACKER</h1>
+    <div class="subtitle" id="menu-subtitle">CHOOSE YOUR WORKOUT &bull; NO EXCUSES</div>
+
+    <div class="row" style="margin-bottom:15px;">
+      <button class="btn-daily btn-wide" id="daily-ai-btn">&#129302; AI DAILY WORKOUT</button>
+      <button class="btn-goal btn-wide" id="goal-ai-btn">&#129504; DESCRIBE A GOAL</button>
+    </div>
+
+    <div class="row" style="margin-bottom:20px;">
+      <button class="btn-steel btn-mid" id="muscle-map-btn">&#129357; MUSCLE MAP</button>
+      <button class="btn-steel btn-mid" id="stats-btn">&#128202; MY STATS</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="exercise-grid" id="exercise-grid"></div>
+
+    <div class="row" style="margin-top:20px;">
+      <button class="btn-steel btn-mid" id="switch-user-btn">SWITCH USER</button>
+      <button class="btn-exit btn-mid" id="exit-btn">EXIT</button>
+    </div>
+
+    <div class="footer-note">STAY CONSISTENT &bull; STAY STRONG</div>
+  </section>
+
+  <!-- ============================================================
+       GOAL VIEW
+  ============================================================ -->
+  <section id="goal-view" class="view">
+    <h1 class="brand">DESCRIBE YOUR GOAL</h1>
+    <div class="goal-hint">e.g. "arms and core", "cardio", "leg day", "full body"</div>
+    <input type="text" id="goal-input" />
+    <div class="row" style="margin-top:25px;">
+      <button class="btn-accent btn-mid" id="goal-generate-btn">GENERATE WORKOUT</button>
+      <button class="btn-steel btn-mid" id="goal-back-btn">BACK</button>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       WORKOUT DASHBOARD VIEW
+  ============================================================ -->
+  <section id="workout-view" class="view"></section>
+
+  <!-- ============================================================
+       HOORAY VIEW
+  ============================================================ -->
+  <section id="hooray-view" class="view"></section>
+
+  <!-- ============================================================
+       MUSCLE MAP VIEW
+  ============================================================ -->
+  <section id="muscle-view" class="view">
+    <h1 class="brand">MUSCLE MAP</h1>
+    <div class="muscle-layout">
+      <div class="muscle-list" id="muscle-list"></div>
+      <canvas id="muscle-canvas" width="300" height="360"></canvas>
+    </div>
+    <div class="muscle-info" id="muscle-info">Select an exercise to see the muscles it targets</div>
+    <button class="btn-steel btn-wide" id="muscle-back-btn">BACK TO MENU</button>
+  </section>
+
+  <!-- ============================================================
+       STATS VIEW
+  ============================================================ -->
+  <section id="stats-view" class="view"></section>
+
+  <!-- ============================================================
+       EXERCISE TRACKER VIEW
+  ============================================================ -->
+  <section id="tracker-view" class="view">
+    <div class="tracker-topbar">
+      <button class="btn-steel" id="tracker-back-btn">BACK TO MENU</button>
+      <button class="btn-daily" id="tracker-reset-btn" style="background:#ff8c00;">RESET</button>
+      <button class="btn-exit" id="tracker-exit-btn">EXIT</button>
+    </div>
+    <div class="video-wrap">
+      <video id="tracker-video" playsinline muted></video>
+      <canvas id="tracker-canvas" width="640" height="480"></canvas>
+    </div>
+    <div class="tracker-info">
+      <div class="ex-title" id="tracker-title">EXERCISE</div>
+      <div class="reps" id="tracker-count">0</div>
+      <div class="state" id="tracker-state">STATE: -</div>
+      <div class="angle" id="tracker-angle"></div>
+    </div>
+    <div class="tracker-hint">Keep your full body visible to the camera, front or side view.</div>
+    <div class="approx-note" id="tracker-approx-note"></div>
+    <div class="camera-error" id="tracker-error" style="display:none;"></div>
+  </section>
+
+  <!-- ============================================================
+       GOODBYE VIEW
+  ============================================================ -->
+  <section id="goodbye-view" class="view">
+    <h1 class="brand">SEE YOU NEXT SESSION</h1>
+    <div class="goodbye-text">You can close this tab now.</div>
+  </section>
+
+</div>
+<div class="accent-bar"></div>
+
+<script>
+/* ================================================================
+   IRON TRACKER - browser port
+   ----------------------------------------------------------------
+   This file ports the original tkinter + OpenCV/MediaPipe desktop
+   app (main.py, workout_ai.py, user_data.py, body_diagram.py,
+   pushups.py) to a single static index.html.
+
+   Fidelity notes:
+   - main.py, workout_ai.py, user_data.py and body_diagram.py are
+     ported line-for-line in behavior (localStorage stands in for
+     the JSON save files on disk).
+   - pushups.py's rep-counting algorithm (angle smoothing + frame
+     debounce) is ported exactly and reused for PUSHUPS.
+   - situps.py, squats.py, lunges.py, jumping_jacks.py,
+     bicep_curls.py, shoulder_press.py, high_knees.py,
+     mountain_climbers.py and plank.py were NOT included in the
+     upload, so their rep-counters below are reasonable
+     approximations built with the same smoothing/debounce engine,
+     not exact ports. Look for TRACKER_CONFIGS below to tune them,
+     or send over the original files for an exact port.
+   ================================================================ */
+
+/* ============================================================
+   EXERCISE LIST (ported from main.py EXERCISES)
+   ============================================================ */
+const EXERCISES = [
+  { name:"PUSHUPS",           emoji:"\u{1F4AA}", color:"#2E8B57", hover:"#256e46", isTimed:false },
+  { name:"SIT-UPS",           emoji:"\u{1F525}", color:"#1E88E5", hover:"#1665a8", isTimed:false },
+  { name:"SQUATS",            emoji:"\u{1F3CB}", color:"#E65100", hover:"#b84300", isTimed:false },
+  { name:"LUNGES",            emoji:"\u{1F9B5}", color:"#00897B", hover:"#00695C", isTimed:false },
+  { name:"JUMPING JACKS",     emoji:"\u2B50",     color:"#B8860B", hover:"#8c6809", isTimed:false },
+  { name:"BICEP CURLS",       emoji:"\u{1F4AA}", color:"#7B1FA2", hover:"#5e1680", isTimed:false },
+  { name:"SHOULDER PRESS",    emoji:"\u{1F64C}", color:"#3949AB", hover:"#283593", isTimed:false },
+  { name:"HIGH KNEES",        emoji:"\u{1F3C3}", color:"#C2185B", hover:"#93123f", isTimed:false },
+  { name:"MOUNTAIN CLIMBERS", emoji:"\u{1F3D4}", color:"#6D4C41", hover:"#4E342E", isTimed:false },
+  { name:"PLANK",             emoji:"\u23F1",     color:"#455A64", hover:"#2f3f47", isTimed:true },
+];
+const EXERCISES_BY_NAME = Object.fromEntries(EXERCISES.map(e => [e.name, e]));
+const EXERCISE_NAMES = EXERCISES.map(e => e.name);
+
+/* ============================================================
+   MUSCLE INFO (ported from body_diagram.py MUSCLE_INFO)
+   ============================================================ */
+const MUSCLE_INFO = {
+  "PUSHUPS":           { regions:new Set(["chest","shoulders","arms"]), muscles:"Chest, Shoulders, Triceps" },
+  "SIT-UPS":           { regions:new Set(["core"]), muscles:"Abdominals" },
+  "SQUATS":            { regions:new Set(["legs"]), muscles:"Quadriceps, Glutes, Hamstrings" },
+  "LUNGES":            { regions:new Set(["legs"]), muscles:"Quadriceps, Glutes, Hamstrings" },
+  "JUMPING JACKS":     { regions:new Set(["shoulders","arms","legs"]), muscles:"Full Body, Shoulders, Calves" },
+  "BICEP CURLS":       { regions:new Set(["arms"]), muscles:"Biceps" },
+  "SHOULDER PRESS":    { regions:new Set(["shoulders","arms"]), muscles:"Shoulders, Triceps" },
+  "HIGH KNEES":        { regions:new Set(["legs","core"]), muscles:"Hip Flexors, Core, Calves" },
+  "MOUNTAIN CLIMBERS": { regions:new Set(["core","shoulders","legs"]), muscles:"Core, Shoulders, Hip Flexors" },
+  "PLANK":             { regions:new Set(["core","shoulders"]), muscles:"Core, Shoulders (stabilizers)" },
+};
+const INACTIVE_COLOR = "#3a3a3a";
+const ACTIVE_COLOR = "#FF6B00";
+const OUTLINE_COLOR = "#F5F5F5";
+
+/* ============================================================
+   BODY DIAGRAM (ported from body_diagram.py draw_body/highlight_regions)
+   ============================================================ */
+const BODY_SHAPES = [
+  { region:"head",      type:"oval", x0:110, y0:10,  x1:190, y1:80  },
+  { region:"shoulders", type:"oval", x0:60,  y0:78,  x1:108, y1:116 },
+  { region:"shoulders", type:"oval", x0:192, y0:78,  x1:240, y1:116 },
+  { region:"chest",     type:"rect", x0:102, y0:85,  x1:198, y1:155 },
+  { region:"core",      type:"rect", x0:107, y0:155, x1:193, y1:222 },
+  { region:"arms",      type:"rect", x0:58,  y0:116, x1:96,  y1:232 },
+  { region:"arms",      type:"rect", x0:204, y0:116, x1:242, y1:232 },
+  { region:"legs",      type:"rect", x0:109, y0:222, x1:146, y1:350 },
+  { region:"legs",      type:"rect", x0:154, y0:222, x1:191, y1:350 },
+];
+
+function drawBody(activeRegions){
+  const canvas = document.getElementById("muscle-canvas");
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  for (const shape of BODY_SHAPES){
+    let color = INACTIVE_COLOR;
+    if (shape.region !== "head" && activeRegions.has(shape.region)) color = ACTIVE_COLOR;
+    ctx.fillStyle = color;
+    ctx.strokeStyle = OUTLINE_COLOR;
+    ctx.lineWidth = 2;
+    const w = shape.x1 - shape.x0, h = shape.y1 - shape.y0;
+    ctx.beginPath();
+    if (shape.type === "oval"){
+      ctx.ellipse(shape.x0 + w/2, shape.y0 + h/2, w/2, h/2, 0, 0, Math.PI*2);
+    } else {
+      ctx.rect(shape.x0, shape.y0, w, h);
+    }
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+/* ============================================================
+   WORKOUT AI (ported from workout_ai.py)
+   ============================================================ */
+const EXERCISE_CATEGORIES = {
+  "PUSHUPS": new Set(["upper","push","chest","arms","triceps"]),
+  "SIT-UPS": new Set(["core","abs"]),
+  "SQUATS": new Set(["lower","legs","quads","glutes"]),
+  "LUNGES": new Set(["lower","legs","quads","glutes","balance"]),
+  "JUMPING JACKS": new Set(["cardio","full body","warmup"]),
+  "BICEP CURLS": new Set(["upper","arms","biceps","pull"]),
+  "SHOULDER PRESS": new Set(["upper","arms","shoulders","push"]),
+  "HIGH KNEES": new Set(["cardio","legs","core"]),
+  "MOUNTAIN CLIMBERS": new Set(["cardio","core","full body"]),
+  "PLANK": new Set(["core","abs","hold"]),
+};
+
+const KEYWORD_CATEGORIES = [
+  ["full body", ["full body"]], ["total body", ["full body"]], ["everything", ["full body"]],
+  ["biceps", ["biceps"]], ["bicep", ["biceps"]],
+  ["triceps", ["triceps"]], ["tricep", ["triceps"]],
+  ["chest", ["chest"]],
+  ["shoulders", ["shoulders"]], ["shoulder", ["shoulders"]],
+  ["arms", ["arms"]], ["arm", ["arms"]],
+  ["push", ["push"]], ["pull", ["pull"]],
+  ["abs", ["abs","core"]], ["stomach", ["abs","core"]], ["belly", ["abs","core"]],
+  ["waist", ["abs","core"]], ["obliques", ["abs","core"]], ["oblique", ["abs","core"]],
+  ["core", ["core","abs"]],
+  ["glutes", ["glutes"]], ["glute", ["glutes"]],
+  ["quads", ["quads"]], ["quad", ["quads"]],
+  ["hamstrings", ["legs"]], ["hamstring", ["legs"]],
+  ["calves", ["legs"]], ["calf", ["legs"]],
+  ["legs", ["legs"]], ["leg", ["legs"]],
+  ["lower body", ["lower"]], ["upper body", ["upper"]],
+  ["cardio", ["cardio"]], ["conditioning", ["cardio"]],
+  ["endurance", ["cardio","hold"]],
+  ["warm up", ["warmup","cardio"]], ["warmup", ["warmup","cardio"]],
+  ["lose weight", ["cardio"]], ["weight loss", ["cardio"]],
+  ["fat loss", ["cardio"]], ["burn fat", ["cardio"]],
+  ["balance", ["balance"]],
+  ["stability", ["core","hold","balance"]],
+];
+
+const TARGET_RANGES = {
+  "PUSHUPS": [8,20], "SIT-UPS": [10,25], "SQUATS": [10,20], "LUNGES": [10,20],
+  "JUMPING JACKS": [15,30], "BICEP CURLS": [8,15], "SHOULDER PRESS": [8,15],
+  "HIGH KNEES": [20,40], "MOUNTAIN CLIMBERS": [20,40], "PLANK": [20,60],
+};
+const TIMED_EXERCISES = new Set(["PLANK"]);
+
+function roundTarget(name, value){
+  if (TIMED_EXERCISES.has(name)){
+    const rounded = Math.round(value/5) * 5;
+    return Math.max(15, rounded);
+  }
+  return Math.max(5, Math.round(value));
+}
+
+function formatTarget(entry){
+  return entry.isTimed ? `${entry.target}s hold` : `${entry.target} reps`;
+}
+function formatAchieved(entry){
+  const achieved = entry.achieved || 0;
+  return entry.isTimed ? `${Math.trunc(achieved)}s` : `${Math.trunc(achieved)} reps`;
+}
+
+function sample(array, count){
+  const pool = array.slice();
+  const out = [];
+  for (let i=0; i<count && pool.length; i++){
+    const idx = Math.floor(Math.random()*pool.length);
+    out.push(pool.splice(idx,1)[0]);
+  }
+  return out;
+}
+function uniform(low, high){ return low + Math.random()*(high-low); }
+
+function generateDailyWorkout(exerciseNames, count=5){
+  count = Math.min(count, exerciseNames.length);
+  const chosen = sample(exerciseNames, count);
+  return chosen.map(name => {
+    const [low, high] = TARGET_RANGES[name] || [10,15];
+    const rawTarget = uniform(low, high);
+    return { name, target: roundTarget(name, rawTarget), isTimed: TIMED_EXERCISES.has(name) };
+  });
+}
+
+function matchCategories(goalText){
+  const text = goalText.toLowerCase();
+  const matched = new Set();
+  for (const [keyword, categories] of KEYWORD_CATEGORIES){
+    if (text.includes(keyword)) categories.forEach(c => matched.add(c));
+  }
+  return matched;
+}
+
+function generateWorkoutFromGoal(goalText, exerciseNames, count=5){
+  count = Math.min(count, exerciseNames.length);
+  const matchedCategories = matchCategories(goalText);
+  if (matchedCategories.size === 0) return generateDailyWorkout(exerciseNames, count);
+
+  const scored = exerciseNames.map(name => {
+    const cats = EXERCISE_CATEGORIES[name] || new Set();
+    let overlap = 0;
+    cats.forEach(c => { if (matchedCategories.has(c)) overlap++; });
+    return [overlap, name];
+  });
+
+  // Shuffle first so ties come out in a different order each time,
+  // then stable-sort by score (Array.sort is stable in modern JS).
+  for (let i = scored.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i+1));
+    [scored[i], scored[j]] = [scored[j], scored[i]];
+  }
+  scored.sort((a,b) => b[0]-a[0]);
+
+  const topPicks = scored.slice(0, count);
+  return topPicks.map(([overlap, name]) => {
+    const [low, high] = TARGET_RANGES[name] || [10,15];
+    const midpoint = low + (high-low)*0.5;
+    let rawTarget;
+    if (overlap >= 2) rawTarget = uniform(midpoint, high);
+    else if (overlap === 1) rawTarget = uniform(low, high);
+    else rawTarget = uniform(low, midpoint);
+    return { name, target: roundTarget(name, rawTarget), isTimed: TIMED_EXERCISES.has(name) };
+  });
+}
+
+/* ============================================================
+   USER DATA (ported from user_data.py; localStorage replaces
+   the JSON save files under save_data/)
+   ============================================================ */
+const STORAGE_PREFIX = "ironTracker:user:";
+
+function sanitizeUsername(username){
+  let cleaned = username.trim().toLowerCase();
+  cleaned = cleaned.replace(/\s+/g, "_");
+  cleaned = cleaned.replace(/[^a-z0-9_\-]/g, "");
+  return cleaned || "player";
+}
+function userKey(username){ return STORAGE_PREFIX + sanitizeUsername(username); }
+
+function listSavedUsernames(){
+  const names = [];
+  for (let i=0; i<localStorage.length; i++){
+    const key = localStorage.key(i);
+    if (!key || !key.startsWith(STORAGE_PREFIX)) continue;
+    try {
+      const data = JSON.parse(localStorage.getItem(key));
+      names.push(data.username || key.slice(STORAGE_PREFIX.length));
+    } catch (e) { /* skip corrupt entry, mirrors user_data.py's try/except */ }
+  }
+  return names.sort();
+}
+
+function defaultUserData(displayUsername){
+  return { username: displayUsername, totals:{}, history:[], current_workout:null };
+}
+
+function loadUser(displayUsername){
+  const key = userKey(displayUsername);
+  const raw = localStorage.getItem(key);
+  if (raw === null){
+    const data = defaultUserData(displayUsername.trim());
+    saveUser(data, key);
+    return { data, key };
+  }
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (e){
+    // corrupted save - back it up and start fresh, like user_data.py
+    localStorage.setItem(key + ".corrupt", raw);
+    data = defaultUserData(displayUsername.trim());
+    saveUser(data, key);
+    return { data, key };
+  }
+  data.username = data.username || displayUsername.trim();
+  data.totals = data.totals || {};
+  data.history = data.history || [];
+  if (!("current_workout" in data)) data.current_workout = null;
+  return { data, key };
+}
+
+function saveUser(data, key){
+  localStorage.setItem(key, JSON.stringify(data));
+}
+
+function recordAttempt(data, exerciseName, achieved, isTimed){
+  if (achieved <= 0) return;
+  data.totals = data.totals || {};
+  const entry = data.totals[exerciseName] || { sessions:0, reps:0, seconds:0, best:0 };
+  entry.sessions += 1;
+  if (isTimed) entry.seconds += achieved; else entry.reps += achieved;
+  entry.best = Math.max(entry.best, achieved);
+  data.totals[exerciseName] = entry;
+}
+
+function archiveWorkout(data, record){
+  data.history = data.history || [];
+  data.history.push(record);
+}
+
+function todayString(){
+  const d = new Date();
+  const mm = String(d.getMonth()+1).padStart(2,"0");
+  const dd = String(d.getDate()).padStart(2,"0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+/* ============================================================
+   APP / SESSION STATE (ported from main.py globals)
+   ============================================================ */
+let currentUsername = null;
+let currentUserData = null;
+let currentUserKey = null;
+
+let currentWorkout = [];
+let currentWorkoutHeading = "TODAY'S AI WORKOUT";
+let currentWorkoutType = null;
+let currentWorkoutGoalText = null;
+
+// what to do when the tracker view finishes (mirrors start_exercise
+// vs start_workout_exercise in main.py)
+let exerciseLaunchContext = null; // {type:'freeplay', name, isTimed} | {type:'workout', index}
+
+/* ============================================================
+   VIEW SWITCHING
+   ============================================================ */
+const VIEW_IDS = ["login-view","menu-view","goal-view","workout-view","hooray-view","muscle-view","stats-view","tracker-view","goodbye-view"];
+function showView(id){
+  for (const v of VIEW_IDS) document.getElementById(v).classList.remove("active");
+  document.getElementById(id).classList.add("active");
+}
+
+/* ============================================================
+   WORKOUT ENTRY HELPERS (ported from main.py)
+   ============================================================ */
+function stripEntry(entry){
+  return { name: entry.name, target: entry.target, is_timed: entry.isTimed, achieved: entry.achieved, done: entry.done };
+}
+
+function persistCurrentWorkout(){
+  if (currentUserData === null) return;
+  if (!currentWorkout.length){
+    currentUserData.current_workout = null;
+  } else {
+    currentUserData.current_workout = {
+      date: todayString(),
+      type: currentWorkoutType,
+      goal_text: currentWorkoutGoalText,
+      heading: currentWorkoutHeading,
+      exercises: currentWorkout.map(stripEntry),
+    };
+  }
+  saveUser(currentUserData, currentUserKey);
+}
+
+function archiveIncompleteCurrentWorkout(){
+  if (currentWorkout.length && !currentWorkout.every(e => e.done)){
+    archiveWorkout(currentUserData, {
+      date: todayString(),
+      type: currentWorkoutType,
+      goal_text: currentWorkoutGoalText,
+      completed: false,
+      exercises: currentWorkout.map(stripEntry),
+    });
+    saveUser(currentUserData, currentUserKey);
+  }
+  currentWorkout = [];
+}
+
+/* ============================================================
+   LOGIN
+   ============================================================ */
+function buildLoginRecentUsers(){
+  const container = document.getElementById("login-recent");
+  container.innerHTML = "";
+  const names = listSavedUsernames();
+  if (!names.length) return;
+
+  const label = document.createElement("div");
+  label.className = "recent-label";
+  label.textContent = "RECENT PLAYERS";
+  container.appendChild(label);
+
+  const row = document.createElement("div");
+  row.className = "recent-row";
+  names.slice(0,8).forEach(name => {
+    const btn = document.createElement("button");
+    btn.className = "recent-btn";
+    btn.textContent = name;
+    btn.onclick = () => quickLogin(name);
+    row.appendChild(btn);
+  });
+  container.appendChild(row);
+}
+
+function quickLogin(name){
+  document.getElementById("login-username").value = name;
+  handleLogin();
+}
+
+function handleLogin(){
+  const typed = document.getElementById("login-username").value.trim();
+  if (!typed){
+    document.getElementById("login-error").textContent = "Please enter a name.";
+    return;
+  }
+  const { data, key } = loadUser(typed);
+  currentUsername = data.username;
+  currentUserData = data;
+  currentUserKey = key;
+
+  document.title = `Iron Tracker - ${currentUsername}`;
+  document.getElementById("menu-subtitle").textContent = `WELCOME, ${currentUsername.toUpperCase()} \u2022 NO EXCUSES`;
+
+  document.getElementById("login-username").value = "";
+  document.getElementById("login-error").textContent = "";
+
+  resumeOrResetWorkout();
+}
+
+function confirmSwitchUser(){
+  if (window.confirm("Log out and switch to a different player?")) handleLogout();
+}
+
+function handleLogout(){
+  currentUsername = null;
+  currentUserData = null;
+  currentUserKey = null;
+  currentWorkout = [];
+  document.title = "Iron Tracker";
+  buildLoginRecentUsers();
+  showView("login-view");
+}
+
+/* ============================================================
+   RESUME TODAY'S WORKOUT (ported from main.py)
+   ============================================================ */
+function resumeOrResetWorkout(){
+  const saved = currentUserData.current_workout;
+  const today = todayString();
+
+  currentWorkout = [];
+  currentWorkoutHeading = "TODAY'S AI WORKOUT";
+  currentWorkoutType = null;
+  currentWorkoutGoalText = null;
+
+  if (!saved){
+    showView("menu-view");
+    return;
+  }
+
+  if (saved.date !== today){
+    const savedExercises = saved.exercises || [];
+    const completed = savedExercises.length > 0 && savedExercises.every(e => e.done);
+    archiveWorkout(currentUserData, {
+      date: saved.date, type: saved.type, goal_text: saved.goal_text,
+      completed, exercises: savedExercises,
+    });
+    currentUserData.current_workout = null;
+    saveUser(currentUserData, currentUserKey);
+    showView("menu-view");
+    return;
+  }
+
+  const rehydrated = [];
+  for (const item of (saved.exercises || [])){
+    const config = EXERCISES_BY_NAME[item.name];
+    if (!config) continue;
+    rehydrated.push({
+      name:item.name, target:item.target, isTimed:item.is_timed,
+      achieved:item.achieved, done:item.done,
+      emoji:config.emoji, color:config.color, hover:config.hover,
+    });
+  }
+
+  if (rehydrated.length && rehydrated.every(e => e.done)){
+    showView("menu-view");
+    return;
+  }
+
+  currentWorkout = rehydrated;
+  currentWorkoutHeading = saved.heading || "TODAY'S AI WORKOUT";
+  currentWorkoutType = saved.type;
+  currentWorkoutGoalText = saved.goal_text;
+
+  renderWorkoutView();
+  showView("workout-view");
+}
+
+/* ============================================================
+   START / FINISH EXERCISE (ported from start_exercise /
+   start_workout_exercise in main.py)
+   ============================================================ */
+function startExercise(name, isTimed){
+  exerciseLaunchContext = { type:"freeplay", name, isTimed };
+  launchTracker(name, isTimed);
+}
+
+function startWorkoutExercise(index){
+  exerciseLaunchContext = { type:"workout", index };
+  const entry = currentWorkout[index];
+  launchTracker(entry.name, entry.isTimed);
+}
+
+function finishExercise(achieved){
+  const ctx = exerciseLaunchContext;
+  exerciseLaunchContext = null;
+  if (!ctx) { showView("menu-view"); return; }
+
+  if (ctx.type === "freeplay"){
+    if (currentUserData !== null){
+      recordAttempt(currentUserData, ctx.name, achieved, ctx.isTimed);
+      saveUser(currentUserData, currentUserKey);
+    }
+    showView("menu-view");
+    return;
+  }
+
+  // workout context
+  const entry = currentWorkout[ctx.index];
+  entry.achieved = achieved;
+  if (achieved >= entry.target) entry.done = true;
+
+  if (currentUserData !== null){
+    recordAttempt(currentUserData, entry.name, achieved, entry.isTimed);
+  }
+
+  const allDone = currentWorkout.length > 0 && currentWorkout.every(e => e.done);
+
+  if (currentUserData !== null){
+    if (allDone){
+      archiveWorkout(currentUserData, {
+        date: todayString(), type: currentWorkoutType, goal_text: currentWorkoutGoalText,
+        completed: true, exercises: currentWorkout.map(stripEntry),
+      });
+      currentUserData.current_workout = null;
+      saveUser(currentUserData, currentUserKey);
+    } else {
+      persistCurrentWorkout();
+    }
+  }
+
+  if (allDone){
+    renderHoorayView();
+    showView("hooray-view");
+  } else {
+    renderWorkoutView();
+    showView("workout-view");
+  }
+}
+
+/* ============================================================
+   BUILD A NEW AI WORKOUT (ported from main.py)
+   ============================================================ */
+function startNewWorkout(prescribed, heading, workoutType, goalText=null){
+  archiveIncompleteCurrentWorkout();
+
+  currentWorkout = prescribed.map(item => {
+    const config = EXERCISES_BY_NAME[item.name];
+    return {
+      name:item.name, target:item.target, isTimed:item.isTimed,
+      emoji:config.emoji, color:config.color, hover:config.hover,
+      achieved:0, done:false,
+    };
+  });
+
+  currentWorkoutHeading = heading;
+  currentWorkoutType = workoutType;
+  currentWorkoutGoalText = goalText;
+
+  persistCurrentWorkout();
+  renderWorkoutView();
+  showView("workout-view");
+}
+
+function startDailyAiWorkout(){
+  const prescribed = generateDailyWorkout(EXERCISE_NAMES);
+  startNewWorkout(prescribed, "TODAY'S AI WORKOUT", "daily");
+}
+
+function handleGoalSubmit(){
+  let text = document.getElementById("goal-input").value.trim();
+  if (!text) text = "full body";
+  const prescribed = generateWorkoutFromGoal(text, EXERCISE_NAMES);
+  document.getElementById("goal-input").value = "";
+  startNewWorkout(prescribed, `YOUR WORKOUT: \u201C${text.toUpperCase()}\u201D`, "goal", text);
+}
+
+/* ============================================================
+   WORKOUT DASHBOARD DISPLAY HELPERS
+   ============================================================ */
+function statusTextFor(entry){
+  if (entry.done) return `\u2705 ${formatAchieved(entry)}`;
+  if (entry.achieved) return `Last try: ${formatAchieved(entry)}`;
+  return "\u23F3 Not started";
+}
+function statusColorFor(entry){
+  if (entry.done) return "#00E676";
+  if (entry.achieved) return "#FFB300";
+  return "var(--text-muted)";
+}
+function completionText(){
+  if (currentWorkout.length && currentWorkout.every(e => e.done)){
+    return "\u{1F389} WORKOUT COMPLETE - GREAT JOB! \u{1F389}";
+  }
+  return "";
+}
+
+/* ============================================================
+   RENDER: WORKOUT DASHBOARD
+   ============================================================ */
+function renderWorkoutView(){
+  const root = document.getElementById("workout-view");
+  root.innerHTML = "";
+
+  const heading = document.createElement("h1");
+  heading.className = "brand";
+  heading.style.fontSize = "1.6rem";
+  heading.style.textAlign = "center";
+  heading.textContent = currentWorkoutHeading;
+  root.appendChild(heading);
+
+  const sub = document.createElement("div");
+  sub.className = "subtitle";
+  sub.textContent = "Hit every target below to finish today's workout";
+  root.appendChild(sub);
+
+  currentWorkout.forEach((entry, index) => {
+    const row = document.createElement("div");
+    row.className = "workout-row";
+
+    const nameEl = document.createElement("div");
+    nameEl.className = "workout-name";
+    nameEl.textContent = `${entry.emoji}  ${entry.name} \u2014 ${formatTarget(entry)}`;
+    row.appendChild(nameEl);
+
+    const statusEl = document.createElement("div");
+    statusEl.className = "workout-status";
+    statusEl.textContent = statusTextFor(entry);
+    statusEl.style.color = statusColorFor(entry);
+    row.appendChild(statusEl);
+
+    const btn = document.createElement("button");
+    btn.textContent = entry.done ? "DONE" : "START";
+    btn.style.background = entry.done ? "var(--done)" : entry.color;
+    btn.disabled = entry.done;
+    btn.onclick = () => startWorkoutExercise(index);
+    row.appendChild(btn);
+
+    root.appendChild(row);
+  });
+
+  const banner = document.createElement("div");
+  banner.className = "completion-banner";
+  banner.textContent = completionText();
+  root.appendChild(banner);
+
+  const bottomRow = document.createElement("div");
+  bottomRow.className = "row";
+  bottomRow.style.marginTop = "20px";
+
+  const newBtn = document.createElement("button");
+  newBtn.className = "btn-daily btn-mid";
+  newBtn.textContent = "NEW RANDOM WORKOUT";
+  newBtn.onclick = startDailyAiWorkout;
+  bottomRow.appendChild(newBtn);
+
+  const backBtn = document.createElement("button");
+  backBtn.className = "btn-steel btn-mid";
+  backBtn.textContent = "BACK TO MENU";
+  backBtn.onclick = () => showView("menu-view");
+  bottomRow.appendChild(backBtn);
+
+  root.appendChild(bottomRow);
+}
+
+/* ============================================================
+   RENDER: HOORAY VIEW
+   ============================================================ */
+function renderHoorayView(){
+  const root = document.getElementById("hooray-view");
+  root.innerHTML = "";
+
+  const banner = document.createElement("div");
+  banner.className = "hooray-banner";
+  banner.textContent = "\u{1F389} HOORAY! \u{1F389}";
+  root.appendChild(banner);
+
+  const message = document.createElement("div");
+  message.style.fontWeight = "700";
+  message.style.fontSize = "1.1rem";
+  message.style.marginBottom = "25px";
+  message.textContent = "You completed today's workout!";
+  root.appendChild(message);
+
+  const summary = document.createElement("div");
+  summary.className = "hooray-summary";
+  currentWorkout.forEach(entry => {
+    const line = document.createElement("div");
+    line.textContent = `${entry.emoji}  ${entry.name} \u2014 ${formatAchieved(entry)} / ${formatTarget(entry)}`;
+    summary.appendChild(line);
+  });
+  root.appendChild(summary);
+
+  const backBtn = document.createElement("button");
+  backBtn.className = "btn-accent btn-wide";
+  backBtn.textContent = "BACK TO MENU";
+  backBtn.onclick = () => showView("menu-view");
+  root.appendChild(backBtn);
+}
+
+/* ============================================================
+   MUSCLE MAP
+   ============================================================ */
+function buildMuscleView(){
+  const list = document.getElementById("muscle-list");
+  list.innerHTML = "";
+  EXERCISES.forEach(ex => {
+    const btn = document.createElement("button");
+    btn.className = "muscle-btn";
+    btn.style.background = ex.color;
+    btn.textContent = `${ex.emoji} ${ex.name}`;
+    btn.onclick = () => selectMuscleExercise(ex.name);
+    list.appendChild(btn);
+  });
+  drawBody(new Set());
+}
+
+function selectMuscleExercise(name){
+  const info = MUSCLE_INFO[name];
+  drawBody(info.regions);
+  document.getElementById("muscle-info").textContent = `${name}: ${info.muscles}`;
+}
+
+/* ============================================================
+   STATS VIEW
+   ============================================================ */
+function renderStatsView(){
+  const root = document.getElementById("stats-view");
+  root.innerHTML = "";
+
+  const title = document.createElement("h1");
+  title.className = "brand";
+  title.style.fontSize = "1.5rem";
+  title.textContent = currentUsername ? `${currentUsername}'S STATS` : "STATS";
+  root.appendChild(title);
+
+  const totals = (currentUserData && currentUserData.totals) || {};
+
+  const table = document.createElement("table");
+  table.className = "stats-table";
+  const thead = document.createElement("tr");
+  ["EXERCISE","SESSIONS","TOTAL","BEST"].forEach(h => {
+    const th = document.createElement("th");
+    th.textContent = h;
+    thead.appendChild(th);
+  });
+  table.appendChild(thead);
+
+  EXERCISES.forEach(ex => {
+    const entry = totals[ex.name];
+    const tr = document.createElement("tr");
+    const nameTd = document.createElement("td");
+    nameTd.textContent = `${ex.emoji} ${ex.name}`;
+    tr.appendChild(nameTd);
+
+    let sessions = "0", total = "-", best = "-";
+    if (entry){
+      sessions = String(entry.sessions);
+      if (ex.isTimed){
+        total = `${Math.trunc(entry.seconds)}s`;
+        best = `${Math.trunc(entry.best)}s`;
+      } else {
+        total = `${entry.reps} reps`;
+        best = `${entry.best} reps`;
+      }
+    }
+    [sessions, total, best].forEach(v => {
+      const td = document.createElement("td");
+      td.textContent = v;
+      tr.appendChild(td);
+    });
+    table.appendChild(tr);
+  });
+  root.appendChild(table);
+
+  const historyTitle = document.createElement("div");
+  historyTitle.className = "history-title";
+  historyTitle.textContent = "RECENT WORKOUT HISTORY";
+  root.appendChild(historyTitle);
+
+  const historyBox = document.createElement("div");
+  historyBox.className = "history-box";
+  const history = (currentUserData && currentUserData.history) || [];
+
+  if (!history.length){
+    const row = document.createElement("div");
+    row.className = "history-row";
+    row.textContent = "No workouts recorded yet - go crush one!";
+    historyBox.appendChild(row);
+  } else {
+    history.slice(-15).reverse().forEach(record => {
+      const mark = record.completed ? "\u2705" : "\u274C";
+      let typeLabel = "Workout";
+      if (record.type === "goal" && record.goal_text) typeLabel = `Goal: "${record.goal_text}"`;
+      else if (record.type === "daily") typeLabel = "Daily AI workout";
+      const row = document.createElement("div");
+      row.className = "history-row";
+      row.textContent = `${record.date || "?"}  |  ${typeLabel}  |  ${mark}`;
+      historyBox.appendChild(row);
+    });
+  }
+  root.appendChild(historyBox);
+
+  const backBtn = document.createElement("button");
+  backBtn.className = "btn-steel btn-wide";
+  backBtn.style.marginTop = "10px";
+  backBtn.textContent = "BACK TO MENU";
+  backBtn.onclick = () => showView("menu-view");
+  root.appendChild(backBtn);
+}
+
+/* ============================================================
+   MENU VIEW SETUP (static parts built once)
+   ============================================================ */
+function buildMenuView(){
+  const grid = document.getElementById("exercise-grid");
+  grid.innerHTML = "";
+  EXERCISES.forEach(ex => {
+    const btn = document.createElement("button");
+    btn.className = "exercise-btn";
+    btn.style.background = ex.color;
+    btn.textContent = `${ex.emoji}  ${ex.name}`;
+    btn.onmouseenter = () => btn.style.background = ex.hover;
+    btn.onmouseleave = () => btn.style.background = ex.color;
+    btn.onclick = () => startExercise(ex.name, ex.isTimed);
+    grid.appendChild(btn);
+  });
+}
+
+/* ================================================================
+   EXERCISE TRACKER ENGINE
+   ================================================================ */
+
+// BlazePose landmark indices (standard MediaPipe Pose numbering -
+// matches mp_pose.PoseLandmark used in pushups.py).
+const LM = {
+  L_SHOULDER:11, R_SHOULDER:12, L_ELBOW:13, R_ELBOW:14, L_WRIST:15, R_WRIST:16,
+  L_HIP:23, R_HIP:24, L_KNEE:25, R_KNEE:26, L_ANKLE:27, R_ANKLE:28,
+};
+
+const POSITION_FRAMES_REQUIRED = 5; // ported from pushups.py
+const HISTORY_LEN = 5;              // ported from pushups.py (deque(maxlen=5))
+
+/* ----------------------------------------------------------
+   calculate_angle() / get_point() / landmark_visible() -
+   ported exactly from pushups.py
+   ---------------------------------------------------------- */
+function calculateAngle(a, b, c){
+  const ba = [a[0]-b[0], a[1]-b[1]];
+  const bc = [c[0]-b[0], c[1]-b[1]];
+  const normBa = Math.hypot(ba[0], ba[1]);
+  const normBc = Math.hypot(bc[0], bc[1]);
+  const denom = normBa * normBc;
+  if (denom === 0) return 0;
+  let cosAngle = (ba[0]*bc[0] + ba[1]*bc[1]) / denom;
+  cosAngle = Math.max(-1, Math.min(1, cosAngle));
+  return Math.acos(cosAngle) * (180/Math.PI);
+}
+function getPoint(landmarks, idx){ return [landmarks[idx].x, landmarks[idx].y]; }
+function landmarkVisible(landmarks, idx, threshold=0.5){
+  const lm = landmarks[idx];
+  return !!lm && (lm.visibility === undefined || lm.visibility > threshold);
+}
+
+/* ----------------------------------------------------------
+   TRACKER_CONFIGS
+   - PUSHUPS is an exact port of pushups.py's arm-angle logic.
+   - Every other exercise is an original approximation (the
+     source .py files for those trackers were not uploaded),
+     built on the same smoothing + debounce engine.
+   ---------------------------------------------------------- */
+const TRACKER_CONFIGS = {
+  "PUSHUPS": {
+    exact: true,
+    triples: [[LM.L_SHOULDER,LM.L_ELBOW,LM.L_WRIST],[LM.R_SHOULDER,LM.R_ELBOW,LM.R_WRIST]],
+    combine:"avg", highThreshold:155, lowThreshold:125,
+    highLabel:"UP", lowLabel:"DOWN", restIsHigh:true,
+  },
+  "SIT-UPS": {
+    exact:false,
+    triples: [[LM.L_SHOULDER,LM.L_HIP,LM.L_KNEE],[LM.R_SHOULDER,LM.R_HIP,LM.R_KNEE]],
+    combine:"avg", highThreshold:150, lowThreshold:90,
+    highLabel:"DOWN", lowLabel:"UP", restIsHigh:true,
+  },
+  "SQUATS": {
+    exact:false,
+    triples: [[LM.L_HIP,LM.L_KNEE,LM.L_ANKLE],[LM.R_HIP,LM.R_KNEE,LM.R_ANKLE]],
+    combine:"avg", highThreshold:160, lowThreshold:100,
+    highLabel:"UP", lowLabel:"DOWN", restIsHigh:true,
+  },
+  "LUNGES": {
+    exact:false,
+    triples: [[LM.L_HIP,LM.L_KNEE,LM.L_ANKLE],[LM.R_HIP,LM.R_KNEE,LM.R_ANKLE]],
+    combine:"avg", highThreshold:160, lowThreshold:100,
+    highLabel:"UP", lowLabel:"DOWN", restIsHigh:true,
+  },
+  "JUMPING JACKS": {
+    exact:false,
+    triples: [[LM.L_HIP,LM.L_SHOULDER,LM.L_WRIST],[LM.R_HIP,LM.R_SHOULDER,LM.R_WRIST]],
+    combine:"avg", highThreshold:110, lowThreshold:30,
+    highLabel:"OPEN", lowLabel:"CLOSED", restIsHigh:false,
+  },
+  "BICEP CURLS": {
+    exact:false,
+    triples: [[LM.L_SHOULDER,LM.L_ELBOW,LM.L_WRIST],[LM.R_SHOULDER,LM.R_ELBOW,LM.R_WRIST]],
+    combine:"avg", highThreshold:150, lowThreshold:60,
+    highLabel:"DOWN", lowLabel:"UP", restIsHigh:true,
+  },
+  "SHOULDER PRESS": {
+    exact:false,
+    triples: [[LM.L_SHOULDER,LM.L_ELBOW,LM.L_WRIST],[LM.R_SHOULDER,LM.R_ELBOW,LM.R_WRIST]],
+    combine:"avg", highThreshold:155, lowThreshold:75,
+    highLabel:"UP", lowLabel:"DOWN", restIsHigh:true,
+  },
+  "HIGH KNEES": {
+    exact:false,
+    triples: [[LM.L_SHOULDER,LM.L_HIP,LM.L_KNEE],[LM.R_SHOULDER,LM.R_HIP,LM.R_KNEE]],
+    combine:"min", highThreshold:150, lowThreshold:100,
+    highLabel:"UP", lowLabel:"DOWN", restIsHigh:true,
+  },
+  "MOUNTAIN CLIMBERS": {
+    exact:false,
+    triples: [[LM.L_SHOULDER,LM.L_HIP,LM.L_KNEE],[LM.R_SHOULDER,LM.R_HIP,LM.R_KNEE]],
+    combine:"min", highThreshold:150, lowThreshold:100,
+    highLabel:"OUT", lowLabel:"IN", restIsHigh:true,
+  },
+  "PLANK": {
+    exact:false, isTimed:true,
+    triples: [[LM.L_SHOULDER,LM.L_HIP,LM.L_ANKLE],[LM.R_SHOULDER,LM.R_HIP,LM.R_ANKLE]],
+    combine:"avg", holdThreshold:150,
+  },
+};
+
+/* ----------------------------------------------------------
+   computeTrackedAngle - generalizes pushups.py's left/right
+   arm averaging to any set of joint triples.
+   ---------------------------------------------------------- */
+function computeTrackedAngle(landmarks, triples, combine){
+  const angles = [];
+  for (const [a,b,c] of triples){
+    if (landmarkVisible(landmarks,a) && landmarkVisible(landmarks,b) && landmarkVisible(landmarks,c)){
+      angles.push(calculateAngle(getPoint(landmarks,a), getPoint(landmarks,b), getPoint(landmarks,c)));
+    }
+  }
+  if (!angles.length) return null;
+  if (combine === "min") return Math.min(...angles);
+  return angles.reduce((s,v)=>s+v,0) / angles.length; // avg
+}
+
+/* ----------------------------------------------------------
+   Tracker runtime state
+   ---------------------------------------------------------- */
+let trackerState = null;   // {counter, stage, highFrames, lowFrames, history, elapsed, holding, lastTs}
+let trackerConfig = null;
+let trackerExerciseName = null;
+let trackerRunning = false;
+let poseInstance = null;
+let cameraStream = null;
+let rafHandle = null;
+
+function resetTracker(){
+  if (!trackerConfig) return;
+  if (trackerConfig.isTimed){
+    trackerState = { elapsed:0, holding:false, lastTs:null };
+  } else {
+    trackerState = {
+      counter:0,
+      stage: trackerConfig.restIsHigh ? "HIGH" : "LOW",
+      highFrames:0, lowFrames:0, history:[],
+    };
+  }
+  updateTrackerDisplay(null);
+}
+
+function updateTrackerRep(angle){
+  const cfg = trackerConfig, st = trackerState;
+  st.history.push(angle);
+  if (st.history.length > HISTORY_LEN) st.history.shift();
+  const smoothed = st.history.reduce((a,b)=>a+b,0) / st.history.length;
+
+  if (smoothed > cfg.highThreshold){
+    st.highFrames += 1; st.lowFrames = 0;
+    if (st.highFrames >= POSITION_FRAMES_REQUIRED){
+      if (cfg.restIsHigh && st.stage === "LOW") st.counter += 1;
+      st.stage = "HIGH";
+    }
+  } else if (smoothed < cfg.lowThreshold){
+    st.lowFrames += 1; st.highFrames = 0;
+    if (st.lowFrames >= POSITION_FRAMES_REQUIRED){
+      if (!cfg.restIsHigh && st.stage === "HIGH") st.counter += 1;
+      st.stage = "LOW";
+    }
+  }
+  return smoothed;
+}
+
+function updateTrackerHold(angle, now){
+  const cfg = trackerConfig, st = trackerState;
+  const holding = angle !== null && angle > cfg.holdThreshold;
+  if (holding && st.holding && st.lastTs !== null){
+    st.elapsed += (now - st.lastTs) / 1000;
+  }
+  st.holding = holding;
+  st.lastTs = now;
+  return holding;
+}
+
+function updateTrackerDisplay(angle){
+  const cfg = trackerConfig, st = trackerState;
+  if (cfg.isTimed){
+    document.getElementById("tracker-count").textContent = Math.floor(st.elapsed);
+    document.getElementById("tracker-state").textContent = `STATE: ${st.holding ? "HOLDING" : "GET IN POSITION"}`;
+  } else {
+    document.getElementById("tracker-count").textContent = st.counter;
+    const label = st.stage === "HIGH" ? cfg.highLabel : cfg.lowLabel;
+    document.getElementById("tracker-state").textContent = `STATE: ${label}`;
+  }
+  document.getElementById("tracker-angle").textContent = angle !== null ? `ANGLE: ${Math.round(angle)}` : "";
+}
+
+/* ----------------------------------------------------------
+   MediaPipe Pose wiring
+   ---------------------------------------------------------- */
+const videoEl = () => document.getElementById("tracker-video");
+const canvasEl = () => document.getElementById("tracker-canvas");
+
+function onPoseResults(results){
+  const canvas = canvasEl();
+  const ctx = canvas.getContext("2d");
+  canvas.width = results.image.width;
+  canvas.height = results.image.height;
+  ctx.save();
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+  let angle = null;
+
+  if (results.poseLandmarks){
+    if (window.drawConnectors && window.POSE_CONNECTIONS){
+      window.drawConnectors(ctx, results.poseLandmarks, window.POSE_CONNECTIONS, { color:"#00FF00", lineWidth:2 });
+    }
+    if (window.drawLandmarks){
+      window.drawLandmarks(ctx, results.poseLandmarks, { color:"#FF6B00", lineWidth:1, radius:3 });
+    }
+
+    if (trackerRunning && trackerConfig){
+      const rawAngle = computeTrackedAngle(results.poseLandmarks, trackerConfig.triples, trackerConfig.combine);
+      if (rawAngle !== null){
+        if (trackerConfig.isTimed){
+          angle = rawAngle;
+          updateTrackerHold(rawAngle, performance.now());
+        } else {
+          angle = updateTrackerRep(rawAngle);
+        }
+      } else if (trackerConfig.isTimed){
+        updateTrackerHold(null, performance.now());
+      }
+    }
+  }
+  ctx.restore();
+
+  if (trackerRunning) updateTrackerDisplay(angle);
+}
+
+async function startCamera(){
+  const video = videoEl();
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { width:640, height:480 }, audio:false });
+  cameraStream = stream;
+  video.srcObject = stream;
+  await video.play();
+
+  poseInstance = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
+  poseInstance.setOptions({
+    modelComplexity:1, smoothLandmarks:true,
+    minDetectionConfidence:0.6, minTrackingConfidence:0.6,
+  });
+  poseInstance.onResults(onPoseResults);
+
+  const loop = async () => {
+    if (!trackerRunning) return;
+    if (video.readyState >= 2){
+      await poseInstance.send({ image: video });
+    }
+    rafHandle = requestAnimationFrame(loop);
+  };
+  rafHandle = requestAnimationFrame(loop);
+}
+
+function stopCamera(){
+  trackerRunning = false;
+  if (rafHandle) cancelAnimationFrame(rafHandle);
+  rafHandle = null;
+  if (poseInstance){ try { poseInstance.close(); } catch(e){} poseInstance = null; }
+  if (cameraStream){
+    cameraStream.getTracks().forEach(t => t.stop());
+    cameraStream = null;
+  }
+  const video = videoEl();
+  video.srcObject = null;
+}
+
+/* ----------------------------------------------------------
+   Launch / stop the tracker view
+   ---------------------------------------------------------- */
+async function launchTracker(exerciseName, isTimed){
+  trackerExerciseName = exerciseName;
+  trackerConfig = TRACKER_CONFIGS[exerciseName];
+  document.getElementById("tracker-title").textContent = exerciseName;
+  document.getElementById("tracker-error").style.display = "none";
+  document.getElementById("tracker-approx-note").textContent = trackerConfig.exact
+    ? ""
+    : "Approximated rep-detection logic (original tracker source for this exercise wasn't provided).";
+
+  resetTracker();
+  showView("tracker-view");
+
+  try {
+    trackerRunning = true;
+    await startCamera();
+  } catch (err){
+    trackerRunning = false;
+    document.getElementById("tracker-error").style.display = "block";
+    document.getElementById("tracker-error").textContent =
+      "Could not access the camera. Check permissions and try again.";
+  }
+}
+
+function endTracker(){
+  const cfg = trackerConfig, st = trackerState;
+  const achieved = cfg.isTimed ? Math.floor(st.elapsed) : st.counter;
+  stopCamera();
+  finishExercise(achieved);
+}
+
+/* ================================================================
+   EXIT / GOODBYE
+   ================================================================ */
+function exitApplication(){
+  if (!window.confirm("Exit Iron Tracker?")) return;
+  showView("goodbye-view");
+  window.close(); // works only if this tab was opened by script; otherwise the goodbye view stays visible
+}
+
+/* ================================================================
+   WIRE UP STATIC EVENT HANDLERS + BOOTSTRAP
+   ================================================================ */
+document.addEventListener("DOMContentLoaded", () => {
+  buildMenuView();
+  buildMuscleView();
+
+  document.getElementById("login-btn").onclick = handleLogin;
+  document.getElementById("login-username").addEventListener("keydown", e => { if (e.key === "Enter") handleLogin(); });
+
+  document.getElementById("daily-ai-btn").onclick = startDailyAiWorkout;
+  document.getElementById("goal-ai-btn").onclick = () => showView("goal-view");
+  document.getElementById("muscle-map-btn").onclick = () => showView("muscle-view");
+  document.getElementById("stats-btn").onclick = () => { renderStatsView(); showView("stats-view"); };
+  document.getElementById("switch-user-btn").onclick = confirmSwitchUser;
+  document.getElementById("exit-btn").onclick = exitApplication;
+
+  document.getElementById("goal-generate-btn").onclick = handleGoalSubmit;
+  document.getElementById("goal-back-btn").onclick = () => showView("menu-view");
+  document.getElementById("goal-input").addEventListener("keydown", e => { if (e.key === "Enter") handleGoalSubmit(); });
+
+  document.getElementById("muscle-back-btn").onclick = () => showView("menu-view");
+
+  document.getElementById("tracker-back-btn").onclick = endTracker;
+  document.getElementById("tracker-exit-btn").onclick = endTracker;
+  document.getElementById("tracker-reset-btn").onclick = resetTracker;
+
+  buildLoginRecentUsers();
+  showView("login-view");
+});
+</script>
+</body>
+</html>
